@@ -1,0 +1,139 @@
+---
+title: 'Coursera: Practical Machine Learning Final Project'
+author: "Maciej Komisarz"
+date: "27th October, 2019"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+This document is the final project for the Coursera “Practical Machine Learning” course.  
+To prepare it, I have used Markdown and Knitr packages of RStudio.
+
+# **_Project background_**
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data collected from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways.   
+Dataset used in this project was made available to the wider audience as a part of research performed by group of Brazilian scientists, Ugulino, W.; Cardador, D.; Vega, K.; Velloso, E.; Milidiu, R.; Fuks, H., described in report titled "Wearable Computing: Accelerometers' Data Classification of Body Postures and Movements".  
+Dataset consists of training data and test data (which will be used to validate the selected model).
+
+# **_Data loading and processing_**
+
+```{r load & preprocessing of data}
+
+library(e1071)
+library(caret)
+library(rpart)
+library(rpart.plot)
+library(RColorBrewer)
+library(rattle)
+library(randomForest)
+
+train_data <- read.csv("pml-training.csv",header=T)
+test_data <- read.csv("pml-testing.csv",header=T)
+dim(train_data)
+dim(test_data)
+str(train_data)
+str(test_data)
+```
+As we can see above, training data contain 19622 observations and 160 variables, whereas test data contain 20 observations and 160 variables. However, many columns have NA or blank values on almost every observation. Due to this we will remove them, as they will not produce any information. Also, the first seven columns give information about the people who did the test, and also timestamps. As these information are not relevant, we will not include them in our final model. Operation will be done on both datasets. 
+
+```{r load & preprocessing of data2}
+# In order to not loose too many data, we will remove only these observations with at least 85% of NAs or blank values from test dataset.
+NA_BLrm_tr <- which(colSums(is.na(train_data)
+|train_data=="")>0.85*dim(train_data)[1]) 
+train_data_red <- train_data[,-NA_BLrm_tr]
+train_data_fin <- train_data_red[, -c(1:7)]
+dim(train_data_fin)
+
+NA_BLrm_te <- which(colSums(is.na(test_data) |test_data=="")>0.85*dim(test_data)[1]) 
+test_data_red <- test_data[,-NA_BLrm_te]
+test_data_fin <- test_data_red[, -c(1:7)]
+dim(test_data_fin)
+```
+
+After cleaning, both the new training data and test data sets have only 53 columns.
+
+# **_Preparation of the datasets for prediction_**
+
+Having cleared the test and trainig data, we will prepare the data for prediction by splitting the training data into 75% as train data and 25% as test data. This splitting will serve also for computing the out-of-sample errors.
+
+```{r prediction dataset}
+set.seed(15324) 
+inTrain <- createDataPartition(train_data_fin$classe, p = 0.75, list = FALSE)
+trainData <- train_data_fin[inTrain, ]
+testData <- train_data_fin[-inTrain, ]
+dim(trainData)
+dim(testData)
+```
+
+# **_Model building_**
+
+In this point we will test 3 different models:  
+1. classification tree   
+2. random forest   
+3. gradient boosting method   
+In order to limit the effects of overfitting, and to improve the efficicency of the models, we will use the cross-validation technique. 
+
+# ***_Classification tree_***
+```{r classification tree}
+trControl <- trainControl(method="cv", number=5)
+CTmodel <- train(classe~., data=trainData, method="rpart", trControl = trControl)
+fancyRpartPlot(CTmodel$finalModel)
+
+#Accuracy of the model & confusion matrix
+train_pred1  <- predict(CTmodel,newdata=testData)
+conf_Mat_CT <- confusionMatrix(testData$classe,train_pred1)
+conf_Mat_CT$table
+conf_Mat_CT$overall[1]
+```
+
+As we can see, accuracy of this first model is very low - only 49,1%. This means we have to find model which is fitted better.
+
+# ***_Random forests_***
+```{r random forests}
+RFControl <- trainControl(method="cv", number=3, verboseIter=FALSE)
+RFmodel <- train(classe~., data=trainData, method="rf", trControl=RFControl, verbose=FALSE)
+print(RFmodel)
+plot(RFmodel,main="Random forest model accuracy vs number of predictors")
+
+#Accuracy of the model & confusion matrix
+train_pred2 <- predict(RFmodel,newdata=testData)
+conf_Mat_RF <- confusionMatrix(testData$classe,train_pred2)
+conf_Mat_RF$table
+conf_Mat_RF$overall[1]
+```
+
+This time accuracy is very high, 99,3%, with use of 3-step cross-validation. According to results, optimal number of predictors which gives the highest accuracy, is 27. Between 2 and 27 predictors there is only a small increase of accuracy, and with more than 27 predictors accuracy drops down - however it is still very good. Results may also indicate that there exists some dependencies between predictors.
+
+# ***_Gradient boosting method_***
+```{r gradient boosting method}
+GBMControl <- trainControl(method = "repeatedcv", number = 5, repeats = 1)
+GBMmodel <- train(classe~., data=trainData, method="gbm", trControl=GBMControl, verbose=FALSE)
+print(GBMmodel)
+plot(GBMmodel)
+
+#Accuracy of the model & confusion matrix
+train_pred3 <- predict(GBMmodel,newdata=testData)
+conf_Mat_GBM <- confusionMatrix(testData$classe,train_pred3)
+conf_Mat_GBM$table
+conf_Mat_GBM$overall[1]
+```
+
+Accuracy with gradient boosting method is again quite high, almost 97%. Best results were aquired for 150 iterations and integration depth of 3.
+
+# **_Conclusions_**
+
+After testing of our dataset with 3 different models, we have obtained following results:  
+1. classification tree - accuracy 49,1%   
+2. random forest - accuracy 99,3%   
+3. gradient boosting method - accuracy 96,9%   
+This comparison shows that the model built with random forest method is the best one. Because of this, it will be used for prediction of  the values of classe for the test data set.
+
+```{r final prediction}
+last_pred <- predict(RFmodel,newdata=test_data_fin)
+last_pred
+```
